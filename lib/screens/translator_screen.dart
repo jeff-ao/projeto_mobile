@@ -1,7 +1,9 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/translation_service.dart';
 import '../main.dart' show themeNotifier;
+import 'history_screen.dart';
 
 class TranslatorScreen extends StatefulWidget {
   const TranslatorScreen({super.key});
@@ -17,6 +19,10 @@ class _TranslatorScreenState extends State<TranslatorScreen> {
   String _translatedText = '';
   String _selectedTranslation = 'yoda';
   bool _isLoading = false;
+  int _characterCount = 0;
+  final List<Map<String, String>> _translationHistory = [];
+  int _currentPageIndex = 0;
+  bool _isSidebarOpen = false;
 
   void _toggleTheme() {
     final currentBrightness = themeNotifier.value;
@@ -45,6 +51,7 @@ class _TranslatorScreenState extends State<TranslatorScreen> {
       setState(() {
         _translatedText = result;
         _isLoading = false;
+        _addToHistory(_textController.text, result, _selectedTranslation);
       });
     } catch (e) {
       setState(() {
@@ -52,6 +59,38 @@ class _TranslatorScreenState extends State<TranslatorScreen> {
       });
       _showAlert(e.toString());
     }
+  }
+
+  void _addToHistory(String original, String translated, String style) {
+    final translationName = TranslationService.availableTranslations.firstWhere(
+      (t) => t['id'] == style,
+    )['name']!;
+
+    final record = {
+      'original': original,
+      'translated': translated,
+      'style': translationName,
+      'timestamp': DateTime.now().toString(),
+    };
+
+    setState(() {
+      _translationHistory.insert(0, record);
+
+      if (_translationHistory.length > 20) {
+        _translationHistory.removeLast();
+      }
+    });
+  }
+
+  void _copyToClipboard(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    _showAlert('Tradução copiada para a área de transferência!');
+  }
+
+  void _toggleSidebar() {
+    setState(() {
+      _isSidebarOpen = !_isSidebarOpen;
+    });
   }
 
   void _showAlert(String message) {
@@ -134,6 +173,210 @@ class _TranslatorScreenState extends State<TranslatorScreen> {
     final brightness = CupertinoTheme.of(context).brightness ?? Brightness.dark;
     final isDark = brightness == Brightness.dark;
 
+    return Stack(
+      children: [
+        _currentPageIndex == 0
+            ? _buildTranslatorPage(isDark, selectedTranslationName)
+            : HistoryScreen(
+                translationHistory: _translationHistory,
+                onMenuPressed: _toggleSidebar,
+              ),
+
+        if (_isSidebarOpen)
+          GestureDetector(
+            onTap: _toggleSidebar,
+            child: Container(color: Colors.black.withOpacity(0.5)),
+          ),
+
+        AnimatedPositioned(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          left: _isSidebarOpen ? 0 : -280,
+          top: 0,
+          bottom: 0,
+          child: _buildSidebar(isDark),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSidebar(bool isDark) {
+    return Container(
+      width: 280,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1C1E) : CupertinoColors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(2, 0),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        child: Column(
+          children: [
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          CupertinoColors.activeBlue,
+                          CupertinoColors.activeBlue.darkColor,
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      CupertinoIcons.globe,
+                      color: CupertinoColors.white,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Tradutor 3000',
+                    style: TextStyle(
+                      color: isDark
+                          ? CupertinoColors.white
+                          : CupertinoColors.black,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              height: 1,
+              color: isDark
+                  ? Colors.white.withOpacity(0.1)
+                  : Colors.black.withOpacity(0.1),
+            ),
+            const SizedBox(height: 10),
+            _buildSidebarItem(
+              icon: CupertinoIcons.house_fill,
+              title: 'Home',
+              isSelected: _currentPageIndex == 0,
+              isDark: isDark,
+              onTap: () {
+                setState(() {
+                  _currentPageIndex = 0;
+                  _isSidebarOpen = false;
+                });
+              },
+            ),
+            _buildSidebarItem(
+              icon: CupertinoIcons.clock_fill,
+              title: 'Histórico',
+              badge: _translationHistory.length.toString(),
+              isSelected: _currentPageIndex == 1,
+              isDark: isDark,
+              onTap: () {
+                setState(() {
+                  _currentPageIndex = 1;
+                  _isSidebarOpen = false;
+                });
+              },
+            ),
+            const Spacer(),
+            Container(
+              height: 1,
+              color: isDark
+                  ? Colors.white.withOpacity(0.1)
+                  : Colors.black.withOpacity(0.1),
+            ),
+            _buildSidebarItem(
+              icon: isDark
+                  ? CupertinoIcons.sun_max_fill
+                  : CupertinoIcons.moon_fill,
+              title: isDark ? 'Tema Claro' : 'Tema Escuro',
+              isDark: isDark,
+              onTap: () {
+                _toggleTheme();
+                _toggleSidebar();
+              },
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSidebarItem({
+    required IconData icon,
+    required String title,
+    String? badge,
+    bool isSelected = false,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: isSelected
+            ? CupertinoColors.activeBlue.withOpacity(0.15)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: CupertinoButton(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        onPressed: onTap,
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              color: isSelected
+                  ? CupertinoColors.activeBlue
+                  : isDark
+                  ? CupertinoColors.white
+                  : CupertinoColors.black,
+              size: 24,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: isSelected
+                      ? CupertinoColors.activeBlue
+                      : isDark
+                      ? CupertinoColors.white
+                      : CupertinoColors.black,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+            if (badge != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: CupertinoColors.activeBlue,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  badge,
+                  style: const TextStyle(
+                    color: CupertinoColors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTranslatorPage(bool isDark, String? selectedTranslationName) {
     return CupertinoPageScaffold(
       backgroundColor: isDark
           ? const Color(0xFF0A0A0A)
@@ -150,14 +393,30 @@ class _TranslatorScreenState extends State<TranslatorScreen> {
             width: 0.5,
           ),
         ),
+        leading: CupertinoButton(
+          padding: EdgeInsets.zero,
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withOpacity(0.1)
+                  : Colors.black.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              CupertinoIcons.line_horizontal_3,
+              color: isDark ? CupertinoColors.white : CupertinoColors.black,
+              size: 20,
+            ),
+          ),
+          onPressed: _toggleSidebar,
+        ),
         middle: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               CupertinoIcons.globe,
-              color: isDark
-                  ? CupertinoColors.activeBlue
-                  : CupertinoColors.activeBlue,
+              color: CupertinoColors.activeBlue,
               size: 24,
             ),
             const SizedBox(width: 8),
@@ -171,351 +430,412 @@ class _TranslatorScreenState extends State<TranslatorScreen> {
             ),
           ],
         ),
-        trailing: CupertinoButton(
-          padding: EdgeInsets.zero,
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withOpacity(0.1)
-                  : Colors.black.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              isDark ? CupertinoIcons.sun_max_fill : CupertinoIcons.moon_fill,
-              color: isDark
-                  ? CupertinoColors.systemYellow
-                  : CupertinoColors.systemIndigo,
-              size: 20,
-            ),
-          ),
-          onPressed: _toggleTheme,
-        ),
       ),
       child: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 20),
-
-              // Aviso sobre o idioma
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 14,
-                ),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: isDark
-                        ? [const Color(0xFF2C2C2E), const Color(0xFF1C1C1E)]
-                        : [Colors.blue.shade50, Colors.indigo.shade50],
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: isDark
-                        ? Colors.blue.withOpacity(0.3)
-                        : Colors.blue.withOpacity(0.2),
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: isDark
-                          ? Colors.blue.withOpacity(0.1)
-                          : Colors.blue.withOpacity(0.08),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: CupertinoColors.activeBlue.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(
-                        CupertinoIcons.info_circle_fill,
-                        color: CupertinoColors.activeBlue,
-                        size: 20,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Digite apenas texto em inglês',
-                        style: TextStyle(
-                          color: isDark
-                              ? CupertinoColors.white
-                              : CupertinoColors.black,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Campo de texto
-              Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: isDark
-                          ? Colors.black.withOpacity(0.3)
-                          : Colors.black.withOpacity(0.05),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: CupertinoTextField(
-                  controller: _textController,
-                  placeholder: 'Type your text here...',
-                  placeholderStyle: TextStyle(
-                    color: CupertinoColors.systemGrey.withOpacity(0.6),
-                  ),
-                  style: TextStyle(
-                    color: isDark
-                        ? CupertinoColors.white
-                        : CupertinoColors.black,
-                    fontSize: 16,
-                    height: 1.5,
-                  ),
-                  maxLines: 6,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF1C1C1E)
-                        : CupertinoColors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isDark
-                          ? Colors.white.withOpacity(0.1)
-                          : Colors.black.withOpacity(0.08),
-                      width: 1,
-                    ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Seletor de tradução
-              GestureDetector(
-                onTap: _showTranslationPicker,
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF1C1C1E)
-                        : CupertinoColors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isDark
-                          ? Colors.white.withOpacity(0.1)
-                          : Colors.black.withOpacity(0.08),
-                      width: 1,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: isDark
-                            ? Colors.black.withOpacity(0.3)
-                            : Colors.black.withOpacity(0.05),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: CupertinoColors.activeBlue.withOpacity(
-                                0.1,
-                              ),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Icon(
-                              CupertinoIcons.textformat,
-                              color: CupertinoColors.activeBlue,
-                              size: 20,
-                            ),
+                      const SizedBox(height: 20),
+
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: isDark
+                                ? [
+                                    const Color(0xFF2C2C2E),
+                                    const Color(0xFF1C1C1E),
+                                  ]
+                                : [Colors.blue.shade50, Colors.indigo.shade50],
                           ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Estilo:',
-                            style: TextStyle(
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isDark
+                                ? Colors.blue.withOpacity(0.3)
+                                : Colors.blue.withOpacity(0.2),
+                            width: 1.5,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
                               color: isDark
-                                  ? CupertinoColors.systemGrey
-                                  : CupertinoColors.systemGrey,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w500,
+                                  ? Colors.blue.withOpacity(0.1)
+                                  : Colors.blue.withOpacity(0.08),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
                             ),
-                          ),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          Text(
-                            selectedTranslationName!,
-                            style: TextStyle(
-                              color: CupertinoColors.activeBlue,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Icon(
-                            CupertinoIcons.chevron_down_circle_fill,
-                            color: CupertinoColors.activeBlue.withOpacity(0.7),
-                            size: 22,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Botão de traduzir
-              Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  gradient: LinearGradient(
-                    colors: _isLoading
-                        ? [
-                            CupertinoColors.systemGrey,
-                            CupertinoColors.systemGrey,
-                          ]
-                        : [
-                            CupertinoColors.activeBlue,
-                            CupertinoColors.activeBlue.darkColor,
                           ],
-                  ),
-                  boxShadow: _isLoading
-                      ? []
-                      : [
-                          BoxShadow(
-                            color: CupertinoColors.activeBlue.withOpacity(0.4),
-                            blurRadius: 20,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                ),
-                child: CupertinoButton(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  borderRadius: BorderRadius.circular(16),
-                  onPressed: _isLoading ? null : _translate,
-                  child: _isLoading
-                      ? const CupertinoActivityIndicator(
-                          color: CupertinoColors.white,
-                        )
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        ),
+                        child: Row(
                           children: [
-                            const Icon(
-                              CupertinoIcons.arrow_right_arrow_left_circle_fill,
-                              color: CupertinoColors.white,
-                              size: 22,
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: CupertinoColors.activeBlue.withOpacity(
+                                  0.2,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(
+                                CupertinoIcons.info_circle_fill,
+                                color: CupertinoColors.activeBlue,
+                                size: 20,
+                              ),
                             ),
-                            const SizedBox(width: 10),
-                            const Text(
-                              'Traduzir Agora',
-                              style: TextStyle(
-                                color: CupertinoColors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.5,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Digite apenas texto em inglês',
+                                style: TextStyle(
+                                  color: isDark
+                                      ? CupertinoColors.white
+                                      : CupertinoColors.black,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
                               ),
                             ),
                           ],
                         ),
-                ),
-              ),
+                      ),
 
-              const SizedBox(height: 30),
+                      const SizedBox(height: 20),
 
-              // Resultado da tradução
-              if (_translatedText.isNotEmpty) ...[
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: CupertinoColors.systemGreen.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(6),
+                      Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: isDark
+                                  ? Colors.black.withOpacity(0.3)
+                                  : Colors.black.withOpacity(0.05),
+                              blurRadius: 16,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            CupertinoTextField(
+                              controller: _textController,
+                              placeholder: 'Type your text here...',
+                              placeholderStyle: TextStyle(
+                                color: CupertinoColors.systemGrey.withOpacity(
+                                  0.6,
+                                ),
+                              ),
+                              style: TextStyle(
+                                color: isDark
+                                    ? CupertinoColors.white
+                                    : CupertinoColors.black,
+                                fontSize: 16,
+                                height: 1.5,
+                              ),
+                              maxLines: 6,
+                              padding: const EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? const Color(0xFF1C1C1E)
+                                    : CupertinoColors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: isDark
+                                      ? Colors.white.withOpacity(0.1)
+                                      : Colors.black.withOpacity(0.08),
+                                  width: 1,
+                                ),
+                              ),
+                              onChanged: (value) {
+                                setState(() {
+                                  _characterCount = value.length;
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              child: Text(
+                                '$_characterCount caracteres',
+                                style: TextStyle(
+                                  color: CupertinoColors.systemGrey,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      child: const Icon(
-                        CupertinoIcons.checkmark_circle_fill,
-                        color: CupertinoColors.systemGreen,
-                        size: 16,
+
+                      const SizedBox(height: 20),
+
+                      GestureDetector(
+                        onTap: _showTranslationPicker,
+                        child: Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? const Color(0xFF1C1C1E)
+                                : CupertinoColors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: isDark
+                                  ? Colors.white.withOpacity(0.1)
+                                  : Colors.black.withOpacity(0.08),
+                              width: 1,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: isDark
+                                    ? Colors.black.withOpacity(0.3)
+                                    : Colors.black.withOpacity(0.05),
+                                blurRadius: 16,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: CupertinoColors.activeBlue
+                                          .withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(
+                                      CupertinoIcons.textformat,
+                                      color: CupertinoColors.activeBlue,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Estilo:',
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? CupertinoColors.systemGrey
+                                          : CupertinoColors.systemGrey,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Row(
+                                children: [
+                                  Text(
+                                    selectedTranslationName!,
+                                    style: TextStyle(
+                                      color: CupertinoColors.activeBlue,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Icon(
+                                    CupertinoIcons.chevron_down_circle_fill,
+                                    color: CupertinoColors.activeBlue
+                                        .withOpacity(0.7),
+                                    size: 22,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Resultado',
-                      style: TextStyle(
-                        color: CupertinoColors.systemGrey,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.3,
+
+                      const SizedBox(height: 20),
+
+                      Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          gradient: LinearGradient(
+                            colors: _isLoading
+                                ? [
+                                    CupertinoColors.systemGrey,
+                                    CupertinoColors.systemGrey,
+                                  ]
+                                : [
+                                    CupertinoColors.activeBlue,
+                                    CupertinoColors.activeBlue.darkColor,
+                                  ],
+                          ),
+                          boxShadow: _isLoading
+                              ? []
+                              : [
+                                  BoxShadow(
+                                    color: CupertinoColors.activeBlue
+                                        .withOpacity(0.4),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 8),
+                                  ),
+                                ],
+                        ),
+                        child: CupertinoButton(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          borderRadius: BorderRadius.circular(16),
+                          onPressed: _isLoading ? null : _translate,
+                          child: _isLoading
+                              ? const CupertinoActivityIndicator(
+                                  color: CupertinoColors.white,
+                                )
+                              : Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(
+                                      CupertinoIcons
+                                          .arrow_right_arrow_left_circle_fill,
+                                      color: CupertinoColors.white,
+                                      size: 22,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    const Text(
+                                      'Traduzir Agora',
+                                      style: TextStyle(
+                                        color: CupertinoColors.white,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: isDark
-                          ? [const Color(0xFF1C1C1E), const Color(0xFF2C2C2E)]
-                          : [Colors.white, Colors.grey.shade50],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: CupertinoColors.systemGreen.withOpacity(0.3),
-                      width: 1.5,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: CupertinoColors.systemGreen.withOpacity(0.15),
-                        blurRadius: 20,
-                        offset: const Offset(0, 6),
-                      ),
+
+                      const SizedBox(height: 30),
+
+                      if (_translatedText.isNotEmpty) ...[
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: CupertinoColors.systemGreen.withOpacity(
+                                  0.2,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Icon(
+                                CupertinoIcons.checkmark_circle_fill,
+                                color: CupertinoColors.systemGreen,
+                                size: 16,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Resultado',
+                              style: TextStyle(
+                                color: CupertinoColors.systemGrey,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: isDark
+                                  ? [
+                                      const Color(0xFF1C1C1E),
+                                      const Color(0xFF2C2C2E),
+                                    ]
+                                  : [Colors.white, Colors.grey.shade50],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: CupertinoColors.systemGreen.withOpacity(
+                                0.3,
+                              ),
+                              width: 1.5,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: CupertinoColors.systemGreen.withOpacity(
+                                  0.15,
+                                ),
+                                blurRadius: 20,
+                                offset: const Offset(0, 6),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                _translatedText,
+                                style: TextStyle(
+                                  color: isDark
+                                      ? CupertinoColors.white
+                                      : CupertinoColors.black,
+                                  fontSize: 17,
+                                  height: 1.6,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              CupertinoButton(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                color: CupertinoColors.activeBlue,
+                                borderRadius: BorderRadius.circular(12),
+                                onPressed: () =>
+                                    _copyToClipboard(_translatedText),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: const [
+                                    Icon(
+                                      CupertinoIcons.doc_on_clipboard,
+                                      color: CupertinoColors.white,
+                                      size: 18,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Copiar Tradução',
+                                      style: TextStyle(
+                                        color: CupertinoColors.white,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
-                  child: Text(
-                    _translatedText,
-                    style: TextStyle(
-                      color: isDark
-                          ? CupertinoColors.white
-                          : CupertinoColors.black,
-                      fontSize: 17,
-                      height: 1.6,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
                 ),
-              ],
-            ],
-          ),
+              ),
+            );
+          },
         ),
       ),
     );
